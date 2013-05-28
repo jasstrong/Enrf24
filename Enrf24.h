@@ -1,4 +1,5 @@
-/* nRF24L01+ I/O for Energia
+/* nRF24L01+ I/O for mbed
+ * Ported by Jas Strong <jasmine@heroicrobotics.com>
  *
  * Copyright (c) 2013 Eric Brundick <spirilis [at] linux dot com>
  *  Permission is hereby granted, free of charge, to any person 
@@ -27,19 +28,9 @@
 
 #define ENRF24_LIBRARY_VERSION 1.5
 
-#include <Energia.h>
-#include <Print.h>
-#include <SPI.h>
+#include "mbed.h"
 #include <stdint.h>
 #include "nRF24L01.h"
-
-#if defined(__LM4F120H5QR__)
-#include <inc/hw_types.h>
-#include <inc/hw_memmap.h>
-#include <driverlib/sysctl.h>
-#include <driverlib/pin_map.h>
-#include <driverlib/gpio.h>
-#endif
 
 #ifndef BITF
   #define BIT0                (0x0001)
@@ -78,11 +69,11 @@
 
 
 /* Class definition--inherits from Print so we have .print() functions */
-class Enrf24 : public Print {
+class Enrf24 {
   public:
     boolean lastTXfailed;
 
-    Enrf24(uint8_t cePin, uint8_t csnPin, uint8_t irqPin);
+    Enrf24(PinName cePin, PinName csnPin, PinName irqPin, PinName miso, PinName mosi, PinName sck);
     void begin(uint32_t datarate=1000000, uint8_t channel=0);  // Specify bitrate & channel
     void end();      // Shut it off, clear the library's state
 
@@ -138,7 +129,9 @@ class Enrf24 : public Print {
     uint8_t txbuf_len;
     uint8_t txbuf[32];
     uint8_t lastirq, readpending;
-    uint8_t _cePin, _csnPin, _irqPin;
+    DigitalOut _cePin, _csnPin, _mosi, _sck;
+    DigitalIn _miso, _irqPin;
+    SPI _spi;
 
     uint8_t _readReg(uint8_t addr);
     void _readRegMultiLSB(uint8_t addr, uint8_t *buf, size_t len);

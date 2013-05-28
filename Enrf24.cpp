@@ -1,4 +1,5 @@
-/* nRF24L01+ I/O for Energia
+/* nRF24L01+ I/O for mbed
+ * Ported by Jas Strong <jasmine@heroicrobotics.com>
  *
  * Copyright (c) 2013 Eric Brundick <spirilis [at] linux dot com>
  *  Permission is hereby granted, free of charge, to any person 
@@ -22,16 +23,20 @@
  *  DEALINGS IN THE SOFTWARE.
  */
 
-#include <Energia.h>
+#include "mbed.h"
 #include <stdint.h>
 #include "Enrf24.h"
 
 /* Constructor */
-Enrf24::Enrf24(uint8_t cePin, uint8_t csnPin, uint8_t irqPin)
+Enrf24::Enrf24(PinName cePin, PinName csnPin, PinName irqPin, PinName miso, PinName mosi, PinName sck) :
+    _cePin(cePin),
+    _csnPin(csnPin),
+    _irqPin(irqPin),
+    _miso(miso),
+    _mosi(mosi),
+    _sck(sckPin),
+    _spi(mosi, miso, sck)
 {
-  _cePin = cePin;
-  _csnPin = csnPin;
-  _irqPin = irqPin;
 
   rf_status = 0;
   rf_addr_width = 5;
@@ -42,14 +47,14 @@ Enrf24::Enrf24(uint8_t cePin, uint8_t csnPin, uint8_t irqPin)
 /* Initialization */
 void Enrf24::begin(uint32_t datarate, uint8_t channel)
 {
-  pinMode(_cePin, OUTPUT);
-  digitalWrite(_cePin, LOW);
-  pinMode(_csnPin, OUTPUT);
-  digitalWrite(_csnPin, HIGH);
-  pinMode(_irqPin, INPUT);
-  digitalWrite(_irqPin, LOW);  // No pullups; the transceiver provides this!
+  _cePin = 0;
+  _csnPin = 1;
+  _irqPin = 0;  // No pullups; the transceiver provides this!
 
-  SPI.transfer(0);  // Strawman transfer, fixes USCI issue on G2553
+  _spi.format(8,0);
+  _spi.frequency(2000000);
+    
+  _spi.write(0);  // Strawman transfer, fixes USCI issue on G2553
 
   // Is the transceiver present/alive?
   if (!_isAlive())
@@ -94,8 +99,8 @@ void Enrf24::end()
   _issueCmd(RF24_FLUSH_RX);
   readpending = 0;
   _irq_clear(ENRF24_IRQ_MASK);
-  digitalWrite(_cePin, LOW);
-  digitalWrite(_csnPin, HIGH);
+  _cePin = 0;
+  _csnPin = 1;
 }
 
 /* Basic SPI I/O */
@@ -103,77 +108,77 @@ uint8_t Enrf24::_readReg(uint8_t addr)
 {
   uint8_t result;
 
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(RF24_R_REGISTER | addr);
-  result = SPI.transfer(RF24_NOP);
-  digitalWrite(_csnPin, HIGH);
+  _csnPin = 0;
+  rf_status = _spi.write(RF24_R_REGISTER | addr);
+  result = _spi.write(RF24_NOP);
+  _csnPin = 1;
   return result;
 }
 
 void Enrf24::_readRegMultiLSB(uint8_t addr, uint8_t *buf, size_t len)
 {
   uint8_t i;
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(RF24_R_REGISTER | addr);
+  _csnPin = 0;
+  rf_status = _spi.write(RF24_R_REGISTER | addr);
   for (i=0; i<len; i++) {
-    buf[len-i-1] = SPI.transfer(RF24_NOP);
+    buf[len-i-1] = _spi.write(RF24_NOP);
   }
-  digitalWrite(_csnPin, HIGH);
+  _csnPin = 1;
 }
 
 void Enrf24::_writeReg(uint8_t addr, uint8_t val)
 {
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(RF24_W_REGISTER | addr);
-  SPI.transfer(val);
-  digitalWrite(_csnPin, HIGH);
+  _csnPin=0;
+  rf_status = _spi.write(RF24_W_REGISTER | addr);
+  _spi.write(val);
+  _csnPin=1;
 }
 
 void Enrf24::_writeRegMultiLSB(uint8_t addr, uint8_t *buf, size_t len)
 {
   size_t i;
 
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(RF24_W_REGISTER | addr);
+  _csnPin = 0;
+  rf_status = _spi.write(RF24_W_REGISTER | addr);
   for (i=0; i<len; i++) {
-    SPI.transfer(buf[len-i-1]);
+    _spi.write(buf[len-i-1]);
   }
-  digitalWrite(_csnPin, HIGH);
+  _csnPin = 1;
 }
 
 void Enrf24::_issueCmd(uint8_t cmd)
 {
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(cmd);
-  digitalWrite(_csnPin, HIGH);
+  _csnPin=0;
+  rf_status = _spi.write(cmd);
+  _csnPin=1;
 }
 
 void Enrf24::_issueCmdPayload(uint8_t cmd, uint8_t *buf, size_t len)
 {
   size_t i;
 
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(cmd);
+  _csnPin = 0;
+  rf_status = _spi.write(cmd);
   for (i=0; i<len; i++) {
-    SPI.transfer(buf[i]);
+    _spi.write(buf[i]);
   }
-  digitalWrite(_csnPin, HIGH);
+  _csnPin = 1;
 }
 
 void Enrf24::_readCmdPayload(uint8_t cmd, uint8_t *buf, size_t len, size_t maxlen)
 {
   size_t i;
 
-  digitalWrite(_csnPin, LOW);
-  rf_status = SPI.transfer(cmd);
+  _csnPin = 0;
+  rf_status = _spi.write(cmd);
   for (i=0; i<len; i++) {
     if (i < maxlen) {
-      buf[i] = SPI.transfer(RF24_NOP);
+      buf[i] = _spi.write(RF24_NOP);
     } else {
-      SPI.transfer(RF24_NOP);  // Beyond maxlen bytes, just discard the remaining data.
+      _spi.write(RF24_NOP);  // Beyond maxlen bytes, just discard the remaining data.
     }
   }
-  digitalWrite(_csnPin, HIGH);
+  _csnPin = 1;
 }
 
 boolean Enrf24::_isAlive()
@@ -271,7 +276,7 @@ void Enrf24::_maintenanceHook()
 /* Public functions */
 boolean Enrf24::available(boolean checkIrq)
 {
-  if (checkIrq && digitalRead(_irqPin) == HIGH && readpending == 0)
+  if (checkIrq && _irqPin && readpending == 0)
     return false;
   _maintenanceHook();
   if ( !(_readReg(RF24_FIFO_STATUS) & RF24_RX_EMPTY) ) {
@@ -336,22 +341,22 @@ void Enrf24::flush()
   reg = _readReg(RF24_CONFIG);
   if ( !(reg & RF24_PWR_UP) ) {
     _writeReg(RF24_CONFIG, ENRF24_CFGMASK_IRQ | ENRF24_CFGMASK_CRC(reg) | RF24_PWR_UP);
-    delay(5);  // 5ms delay required for nRF24 oscillator start-up
+    wait_us(5000);  // 5ms delay required for nRF24 oscillator start-up
   }
   if (reg & RF24_PRIM_RX) {
     origrx=true;
-    digitalWrite(_cePin, LOW);
+    _cePin = 0;
     _writeReg(RF24_CONFIG, ENRF24_CFGMASK_IRQ | ENRF24_CFGMASK_CRC(reg) | RF24_PWR_UP);
   }
 
   _issueCmdPayload(RF24_W_TX_PAYLOAD, txbuf, txbuf_len);
-  digitalWrite(_cePin, HIGH);
-  delayMicroseconds(30);
-  digitalWrite(_cePin, LOW);
+  _cePin = 1;
+  wait_us(30);
+  _cePin = 0;
 
   txbuf_len = 0;  // Reset TX ring buffer
 
-  while (digitalRead(_irqPin) == HIGH)  // Wait until IRQ fires
+  while (_irqPin)  // Wait until IRQ fires
     ;
   // IRQ fired
   _maintenanceHook();  // Handle/clear IRQ
@@ -398,7 +403,7 @@ uint8_t Enrf24::radioState()
 
   // At this point it's either Standby-I, II or PRX.
   if (reg & RF24_PRIM_RX) {
-    if (digitalRead(_cePin))
+    if (_cePin)
       return ENRF24_STATE_PRX;
     // PRIM_RX=1 but CE=0 is a form of idle state.
     return ENRF24_STATE_IDLE;
@@ -417,7 +422,7 @@ void Enrf24::deepsleep()
   if (reg & (RF24_PWR_UP | RF24_PRIM_RX)) {
     _writeReg(RF24_CONFIG, ENRF24_CFGMASK_IRQ | ENRF24_CFGMASK_CRC(reg));
   }
-  digitalWrite(_cePin, LOW);
+  _cePin = 0;
 }
 
 void Enrf24::enableRX()
@@ -426,10 +431,10 @@ void Enrf24::enableRX()
 
   reg = _readReg(RF24_CONFIG);
   _writeReg(RF24_CONFIG, ENRF24_CFGMASK_IRQ | ENRF24_CFGMASK_CRC(reg) | RF24_PWR_UP | RF24_PRIM_RX);
-  digitalWrite(_cePin, HIGH);
+  _cePin = 1;
 
   if ( !(reg & RF24_PWR_UP) ) {  // Powering up from deep-sleep requires 5ms oscillator start delay
-    delay(5);
+    wait(5 / 1000);
   }
 }
 
@@ -437,7 +442,7 @@ void Enrf24::disableRX()
 {
   uint8_t reg;
 
-  digitalWrite(_cePin, LOW);
+  _cePin = 0;
 
   reg = _readReg(RF24_CONFIG);
   if (reg & RF24_PWR_UP) {  /* Keep us in standby-I if we're coming from RX mode, otherwise stay
